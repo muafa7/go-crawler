@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 
 	"golang.org/x/net/html"
@@ -15,9 +16,9 @@ func main() {
 		return
 	}
 
-	url := os.Args[1]
+	rawURL := os.Args[1]
 
-	resp, err := http.Get(url)
+	resp, err := http.Get(rawURL)
 	if err != nil {
 		log.Fatalf("Failed to fetch URL: %v", err)
 	}
@@ -33,19 +34,30 @@ func main() {
 		log.Fatalf("Failed to parse HTML: %v", err)
 	}
 
-	extractLinks(doc)
+	parsedURL, _ := url.Parse(rawURL)
+
+	extractLinks(doc, parsedURL)
 }
 
-func extractLinks(n *html.Node) {
+func extractLinks(n *html.Node, base *url.URL) {
 	if n.Type == html.ElementNode && n.Data == "a" {
 		for _, attr := range n.Attr {
 			if attr.Key == "href" {
-				fmt.Println(attr.Val)
+				link, err := url.Parse(attr.Val)
+				if err != nil {
+					continue
+				}
+
+				absolute := base.ResolveReference(link)
+
+				if absolute.Host == base.Host {
+					fmt.Println(absolute.String())
+				}
 			}
 		}
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		extractLinks(c)
+		extractLinks(c, base)
 	}
 }
