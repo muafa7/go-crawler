@@ -10,6 +10,8 @@ import (
 	"golang.org/x/net/html"
 )
 
+var visited = make(map[string]bool)
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: go run main.go https://example.com")
@@ -18,31 +20,60 @@ func main() {
 
 	rawURL := os.Args[1]
 
-	resp, err := http.Get(rawURL)
-	if err != nil {
-		log.Fatalf("Failed to fetch URL: %v", err)
+	// start crawling with depth limit
+	crawl(rawURL, 2)
+}
+
+func crawl(rawURL string, depth int) {
+	if depth <= 0 {
+		return
 	}
 
+	// prevent duplicate crawling
+	if visited[rawURL] {
+		return
+	}
+	visited[rawURL] = true
+
+	fmt.Println("Crawling:", rawURL)
+
+	resp, err := http.Get(rawURL)
+	if err != nil {
+		log.Println("Request error:", err)
+		return
+	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("Bad Status: %s", resp.Status)
+		log.Println("Bad status:", resp.Status)
+		return
 	}
 
 	doc, err := html.Parse(resp.Body)
 	if err != nil {
-		log.Fatalf("Failed to parse HTML: %v", err)
+		log.Println("Parse error:", err)
+		return
 	}
 
-	parsedURL, _ := url.Parse(rawURL)
+	baseURL, err := url.Parse(rawURL)
+	if err != nil {
+		return
+	}
 
-	extractLinks(doc, parsedURL)
+	links := extractLinks(doc, baseURL)
+
+	for _, link := range links {
+		crawl(link, depth-1)
+	}
 }
 
-func extractLinks(n *html.Node, base *url.URL) {
+func extractLinks(n *html.Node, base *url.URL) []string {
+	var links []string
+
 	if n.Type == html.ElementNode && n.Data == "a" {
 		for _, attr := range n.Attr {
 			if attr.Key == "href" {
+
 				link, err := url.Parse(attr.Val)
 				if err != nil {
 					continue
@@ -50,14 +81,25 @@ func extractLinks(n *html.Node, base *url.URL) {
 
 				absolute := base.ResolveReference(link)
 
-				if absolute.Host == base.Host {
-					fmt.Println(absolute.String())
+				// skip different domains
+				if absolute.Host != base.Host {
+					continue
 				}
+
+				// skip fragments
+				if absolute.Fragment != "" {
+					continue
+				}
+
+				links = append(links, absolute.String())
 			}
 		}
 	}
 
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		extractLinks(c, base)
+		childLinks := extractLinks(c, base)
+		links = append(links, childLinks...)
 	}
+
+	return links
 }
